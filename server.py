@@ -664,7 +664,10 @@ async def models():
 
 if __name__ == "__main__":
     import uvicorn
-    print("╔════════════════════════════════════╗")
-    print("║            Beep                     ║")
-    print("╚════════════════════════════════════╝")
+    print("██████╗ ███████╗███████╗██████╗ ")
+    print("██╔══██╗██╔════╝██╔════╝██╔══██╗")
+    print("██████╔╝█████╗  █████╗  ██████╔╝")
+    print("██╔══██╗██╔══╝  ██╔══╝  ██╔═══╝ ")
+    print("██████╔╝███████╗███████╗██║     ")
+    print("╚═════╝ ╚══════╝╚══════╝╚═╝     ")
     uvicorn.run("server:app", host=settings.host, port=settings.port, log_level="info")
