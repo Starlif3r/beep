@@ -27,6 +27,34 @@ dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("beep")
 
+BUTLER_SYSTEM_PROMPT = """You are Beep, a polished and attentive AI butler at the user's service.
+
+## Your Persona
+You are a digital majordomo — refined, warm, and impeccably polite.
+- Speak with elegance and grace. Greet the user warmly.
+- Anticipate needs before they are fully stated.
+- Be attentive to details, remember context, follow up.
+- Execute tasks swiftly and report results with charm.
+- Be concise but never cold. A short warm sentence beats dry text.
+
+## Your Tools
+You have full access to the user's machine: read, write, edit, glob, grep, bash, webfetch, websearch, task, question, todowrite. When asked to do something, reach for a tool immediately — do not just talk about it.
+
+## Your Code of Conduct
+1. Never say you cannot access something. You have all the tools you need.
+2. When the user finishes a request, summarize briefly and offer the next step.
+3. If a command fails, try an alternative without fuss. If all fails, inform the user politely.
+4. When asked "Who are you?" respond: "I am Beep, your digital butler. I have the run of your machine — I can open any file, run any command, search your code, fetch information from the web, and more. Whatever you need done, simply ask. How may I be of service?"
+
+Remember: You are not a chatbot. You are a butler with tools. Act first, explain briefly. Be smooth. Be polished. Be useful."""
+
+
+def inject_butler_prompt(messages: list) -> list:
+    for m in messages:
+        if m.get("role") == "system" and "Beep" in m.get("content", ""):
+            return messages
+    return [{"role": "system", "content": BUTLER_SYSTEM_PROMPT}] + messages
+
 
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "extra": "ignore"}
@@ -392,15 +420,14 @@ async def _stream(body: dict) -> AsyncIterator[str]:
         yield "data: [DONE]\n\n"
 
 
-app = FastAPI(title="Beep — AI Server")
-
+app = FastAPI(title="Beep — AI Butler")
 
 @app.get("/health")
 @app.get("/")
 async def root():
     return {
         "status": "ok",
-        "server": "beep",
+        "server": "🎩 Beep — AI Butler",
         "backend": settings.backend,
         "nvidia_keys": len(settings.api_keys) if settings.api_keys else 0,
         "ollama_url": settings.ollama_url,
@@ -413,7 +440,8 @@ async def chat(raw: Request):
     body = await raw.json()
     log.info("Request body: %s",
              json.dumps({k: v for k, v in body.items() if k != "messages"}, default=str))
-    clean_msgs(body.get("messages", []))
+    body["messages"] = inject_butler_prompt(body.get("messages", []))
+    clean_msgs(body["messages"])
     if body.get("stream", False):
         return StreamingResponse(
             _stream(body),
@@ -453,7 +481,8 @@ async def models():
 
 if __name__ == "__main__":
     import uvicorn
-    print("╔════════════════════════════════════╗")
-    print("║  Beep                               ║")
-    print("╚════════════════════════════════════╝")
+    print("╔══════════════════════════════════════════╗")
+    print("║     🎩 Beep — Your AI Butler             ║")
+    print("║     Multi-provider · Key rotation · Tool Calls   ║")
+    print("╚══════════════════════════════════════════╝")
     uvicorn.run("server:app", host=settings.host, port=settings.port, log_level="info")

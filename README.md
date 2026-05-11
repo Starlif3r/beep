@@ -16,11 +16,11 @@
   </pre>
 </h1>
 
-<p align="center"><b>Multi-provider AI gateway — rotate unlimited NVIDIA keys, fall back to Ollama, talk to any OpenAI client.</b></p>
+<p align="center"><b>🎩 The AI Butler — Multi-provider gateway with unlimited NVIDIA key rotation, tool calling, and a polished majordomo personality.</b></p>
 
 <p align="center">
   <i>Drop as many NVIDIA API keys as you want. More keys = more throughput.<br>
-  Built for OpenCode, works with anything.</i>
+  Built for OpenCode, works with anything. Comes with a built-in butler persona.</i>
 </p>
 
 ---
@@ -28,7 +28,8 @@
 ## Features
 
 | | Feature | Description |
-|---|---|---|
+|---|---|---|---|
+| 🎩 | **Butler Persona** | Built-in majordomo system prompt — every reply is polished, warm, and proactive. |
 | 🔑 | **Unlimited Key Rotation** | Throw 4, 10, or 100 NVIDIA keys at it. Beep cycles round-robin. Rate-limited keys cool down, others keep serving. All hot? The coolest one gets force-picked. |
 | 🌐 | **Dual Backend** | Prefix `nvidia/` or `ollama/` to choose. Default goes to NVIDIA, falls back to Ollama when offline. |
 | 🛠️ | **Tool Calling** | Full OpenAI function calling in streaming + non-streaming. Auto-fixes missing IDs, null args, wrong finish reasons. |
@@ -188,13 +189,22 @@ NVIDIA_API_KEYS=nvapi-1,nvapi-2,nvapi-3,nvapi-4,nvapi-5,nvapi-6,nvapi-7,nvapi-8,
 
 ## 🎩 Butler Persona
 
-Beep becomes a **polite, proactive AI butler** when you add the `AGENTS.md` instruction file:
+Beep isn't just a gateway — it's a **digital majordomo**. Every request gets an elegant system prompt that transforms the AI into a polished, attentive butler:
+
+- **Polished** — speaks with elegance and warmth
+- **Proactive** — anticipates needs before they're fully stated
+- **Attentive** — notices details, remembers context, follows up
+- **Efficient** — executes tasks swiftly and reports with charm
+
+The butler persona is injected server-side on every chat request — no client configuration needed. Works automatically with OpenCode, curl, or any OpenAI client.
+
+You can also use the included `AGENTS.example.md` with OpenCode for enhanced agent behavior:
 
 ```
-~/.config/opencode/AGENTS.md
+cp AGENTS.example.md ~/.config/opencode/AGENTS.md
 ```
 
-This transforms the agent into a digital majordomo — polished, attentive, and smooth. It will greet you with warmth, anticipate your needs, and execute tasks with elegance. Copy `AGENTS.example.md` from this repo to get started.
+This gives the OpenCode agent itself a butler personality, making it proactively use tools, never deny access, and report results with grace.
 
 ---
 
