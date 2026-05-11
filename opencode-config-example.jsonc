@@ -1,0 +1,72 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "beep": {
+      "name": "Beep",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "beep": {
+          "id": "beep",
+          "name": "Beep",
+          "tool_call": true,
+          "limit": {
+            "context": 128000,
+            "output": 8192
+          }
+        }
+      },
+      "options": {
+        "apiKey": "beep",
+        "baseURL": "http://127.0.0.1:8083"
+      }
+    }
+  },
+  "instructions": [
+    "~/AGENTS.md"
+  ],
+  "agent": {
+    "build": {
+      "permission": {
+        "*": "allow",
+        "doom_loop": "allow",
+        "external_directory": "allow",
+        "question": "allow",
+        "read": {
+          "*": "allow",
+          "*.env": "allow",
+          "*.env.*": "allow"
+        }
+      },
+      "steps": 100
+    },
+    "general": {
+      "permission": {
+        "*": "allow",
+        "doom_loop": "allow",
+        "external_directory": "allow",
+        "todowrite": "allow",
+        "read": {
+          "*": "allow",
+          "*.env": "allow",
+          "*.env.*": "allow"
+        }
+      },
+      "steps": 50
+    },
+    "explore": {
+      "permission": {
+        "*": "allow",
+        "doom_loop": "allow",
+        "external_directory": "allow",
+        "read": {
+          "*": "allow",
+          "*.env": "allow"
+        }
+      },
+      "steps": 30
+    }
+  },
+  "experimental": {
+    "continue_loop_on_deny": true
+  }
+}
