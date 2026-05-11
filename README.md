@@ -30,20 +30,20 @@
 | | Feature | Description |
 |---|---|---|---|
 | 🎩 | **Butler Persona** | Built-in majordomo system prompt — every reply is polished, warm, and proactive. |
+| 🧠 | **Persistent Memory** | Long-term memory via [MemPalace](https://github.com/bensig/mempalace) — vector search + BM25 + Knowledge Graph. Auto-saves every conversation. |
 | 🔑 | **Unlimited Key Rotation** | Throw 4, 10, or 100 NVIDIA keys at it. Beep cycles round-robin. Rate-limited keys cool down, others keep serving. All hot? The coolest one gets force-picked. |
 | 🌐 | **Dual Backend** | Prefix `nvidia/` or `ollama/` to choose. Default goes to NVIDIA, falls back to Ollama when offline. |
 | 🛠️ | **Tool Calling** | Full OpenAI function calling in streaming + non-streaming. Auto-fixes missing IDs, null args, wrong finish reasons. |
-| 🧹 | **Content Cleaning** | Strips `<thinking>`, `<reasoning>`, `<example>` tags and `||||` filler from NVIDIA outputs. |
 | 🔌 | **Drop-in Replacement** | Native OpenAI protocol. Works with OpenCode, Cursor, any OpenAI SDK, curl. |
-| 📦 | **Single File** | ~300 lines of Python. Deploy anywhere — bare metal, VPS, Raspberry Pi, systemd. |
+| 📦 | **One-Click Setup** | Single `bash setup.sh` installs everything — no hunting for packages.
 
 ---
 
 ## Architecture
 
 ```
-                          ⚡ BEEP ⚡
-                                                          
+                           ⚡ BEEP ⚡
+                                                           
   ┌──────────────┐     ┌───────────────────────────────────────────────┐
   │              │     │                                               │
   │   OpenCode   │     │   ┌──────────┐    ┌──────────────────────┐    │
@@ -53,17 +53,20 @@
   │              │     │   └──────────┘    └──────────────────────┘    │
   │              │     │                                               │
   │              │     │   ┌───────────────────────────────────────┐   │
-  │              │     │   │  Tool Call Engine                     │   │
-  │              │     │   │  ┌────────┐  ┌──────────┐  ┌──────┐  │   │
-  │              │     │   │  │ Fix ID │  │ Fix Args │  │ Fix  │  │   │
-  │              │     │   │  │ null→  │  │ null→""  │  │Model │  │   │
-  │              │     │   │  │ uuid   │  │          │  │Name  │  │   │
-  │              │     │   │  └────────┘  └──────────┘  └──────┘  │   │
+  │              │     │   │  🧠 MemPalace Memory                  │   │
+  │              │     │   │  ┌──────────┐  ┌───────────────┐     │   │
+  │              │     │   │  │ Vector   │  │  BM25 Keyword │     │   │
+  │              │     │   │  │ Search   │  │  Search       │     │   │
+  │              │     │   │  └──────────┘  └───────────────┘     │   │
+  │              │     │   │  ┌───────────────────────────────┐   │   │
+  │              │     │   │  │  Knowledge Graph (entities)   │   │   │
+  │              │     │   │  └───────────────────────────────┘   │   │
   │              │     │   └───────────────────────────────────────┘   │
   │              │     │                                               │
   │              │     │   ┌───────────────────────────────────────┐   │
-  │              │     │   │  Content Filter                       │   │
-  │              │     │   │  ✗ <thinking>  ✗ <reasoning>  ✗ |||| │   │
+  │              │     │   │  Butler Persona + Tool Call Engine    │   │
+  │              │     │   │  🎩 Smooth · Warm · Proactive         │   │
+  │              │     │   │  🛠️ Auto-fix tool calls              │   │
   │              │     │   └───────────────────────────────────────┘   │
   └──────────────┘     └───────────────────────────────────────────────┘
 ```
@@ -108,37 +111,37 @@
 
 ## Quick Start
 
-### 1. Install
+### 1. Install (one command)
 
 ```bash
-pip install -r requirements.txt
+bash setup.sh
 ```
 
-### 2. Configure
+This single command installs everything:
+- Python packages (FastAPI, OpenAI, httpx, etc.)
+- [MemPalace](https://github.com/bensig/mempalace) — vector memory engine
+- Identity file and memory palace initialization
+- All auto-configured — no manual steps
+
+### 2. Add your keys
 
 ```bash
-cp .env.example .env
+nano .env
 ```
 
-Edit `.env`:
+Add your NVIDIA API keys (as many as you want):
 
 ```env
-# More keys = more throughput. No upper limit.
 NVIDIA_API_KEYS=nvapi-key1,nvapi-key2,nvapi-key3,nvapi-key4,nvapi-key5
 ```
 
 ### 3. Run
 
 ```bash
-python server.py
+bash run.sh
 ```
 
-```
-╔════════════════════════════════════╗
-║  Beep                              ║
-╚════════════════════════════════════╝
-INFO:     Uvicorn running on http://0.0.0.0:8083
-```
+That's it. Beep starts with memory, personality, and tool calling ready.
 
 ### 4. Verify
 
@@ -152,7 +155,8 @@ curl http://localhost:8083/health
   "server": "beep",
   "backend": "nvidia",
   "nvidia_keys": 5,
-  "ollama_url": "http://localhost:11434"
+  "ollama_url": "http://localhost:11434",
+  "mempalace_drawers": 32
 }
 ```
 
@@ -205,6 +209,42 @@ cp AGENTS.example.md ~/.config/opencode/AGENTS.md
 ```
 
 This gives the OpenCode agent itself a butler personality, making it proactively use tools, never deny access, and report results with grace.
+
+---
+
+## 🧠 Persistent Memory (MemPalace)
+
+Beep has **long-term memory** powered by [MemPalace](https://github.com/bensig/mempalace) — a local-first, verbatim AI memory system using vector search (ChromaDB) + BM25 keyword search + Knowledge Graph.
+
+**How it works:**
+1. Every chat request automatically searches MemPalace for relevant past conversations and project context
+2. Found memories are injected as context — Beep remembers what you discussed before
+3. Every conversation turn is auto-saved into the palace for future recall
+4. On first run, Beep auto-initializes the palace and mines project files
+
+**Memory Architecture:**
+
+| Layer | What | Size |
+|-------|------|------|
+| L0 | Identity — who Beep is | ~100 tokens |
+| L1 | Essential Story — top project memories | ~500–800 tokens |
+| L2 | On-Demand — search results per request | Variable |
+| L3 | Deep Search — full palace query | Unlimited |
+
+**Credits:** Beep's memory system is powered by [MemPalace](https://github.com/bensig/mempalace) (v3.3.5), created by [Milla Jovovich (@bensig)](https://github.com/bensig). It uses the [mempalace-develop](https://github.com/bensig/mempalace) repository — a local-first, verbatim AI memory system featuring:
+- **ChromaDB** vector search with HNSW indexing
+- **BM25** keyword search with SQLite FTS5 fallback
+- **Knowledge Graph** with temporal entity-relationship traversal
+- **4-layer memory stack** (Identity → Essential Story → On-Demand → Deep Search)
+- **96.6% R@5** on LongMemEval, entirely local, zero API calls
+
+The memory is pre-initialized and auto-mines your project files on first run.
+
+**Endpoints:**
+- `GET /mempalace/search?q=...` — search the palace
+- `GET /mempalace/wakeup` — get L0 + L1 context
+
+**No setup needed** — Beep initializes everything automatically on first run.
 
 ---
 
@@ -357,9 +397,18 @@ Then use `ollama/llama3` as your model name.
   "server": "beep",
   "backend": "nvidia",
   "nvidia_keys": 5,
-  "ollama_url": "http://localhost:11434"
+  "ollama_url": "http://localhost:11434",
+  "mempalace_drawers": 32
 }
 ```
+
+### `GET /mempalace/search?q=<query>&n_results=5`
+
+Search the memory palace for relevant context. Returns ranked results with text, similarity, wing, room, and source file.
+
+### `GET /mempalace/wakeup`
+
+Returns L0 identity + L1 essential story context from the palace.
 
 ### `POST /v1/chat/completions`
 

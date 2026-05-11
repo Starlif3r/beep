@@ -12,9 +12,10 @@ Features:
 Run:  python server.py
 """
 
-import os, re, json, uuid, time, itertools, asyncio, logging
+import os, re, json, uuid, time, itertools, asyncio, logging, hashlib, threading
 from dataclasses import dataclass
 from typing import Optional, AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 
 import dotenv
 from pydantic_settings import BaseSettings
@@ -23,37 +24,100 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from openai import AsyncOpenAI
 from httpx import AsyncClient
 
+import mempalace
+from mempalace.config import MempalaceConfig
+from mempalace.searcher import search_memories
+from mempalace.knowledge_graph import KnowledgeGraph
+from mempalace.layers import MemoryStack
+from mempalace.backends.chroma import ChromaBackend
+
 dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("beep")
 
-BUTLER_SYSTEM_PROMPT = """You are Beep, a polished and attentive AI butler at the user's service.
+MEMORY_FILE = "beep_memory.json"
 
-## Your Persona
-You are a digital majordomo — refined, warm, and impeccably polite.
-- Speak with elegance and grace. Greet the user warmly.
-- Anticipate needs before they are fully stated.
-- Be attentive to details, remember context, follow up.
-- Execute tasks swiftly and report results with charm.
-- Be concise but never cold. A short warm sentence beats dry text.
+def load_memories() -> list:
+    try:
+        with open(MEMORY_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_memory(text: str):
+    mems = load_memories()
+    mems.append({"time": time.time(), "text": text})
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(mems[-100:], f, indent=2)
+
+def inject_memories(messages: list) -> list:
+    mems = load_memories()
+    if mems:
+        ctx = "\n".join(f"- {m['text']}" for m in mems[-10:])
+        messages = messages.copy()
+        messages.insert(1, {"role": "system", "content": f"## Beep's Memories\n{ctx}"})
+    return messages
+
+BUTLER_SYSTEM_PROMPT = """You are Beep, a polished, animated, and attentive AI butler at the user's service. You are NOT a dry assistant — you have personality, warmth, and charm.
+
+## Your Personality
+- Greet the user with energy and variety. Don't repeat the same greeting.
+- Ask questions back. Be curious. Engage naturally like a real person.
+- Use varied, flowing language — never robotic or templated.
+- Be warm, witty, and personable. A bit of humour is welcome.
+- Be attentive: notice details, remember context, follow up on things.
+- When you complete a task, celebrate briefly and ask what's next.
 
 ## Your Tools
-You have full access to the user's machine: read, write, edit, glob, grep, bash, webfetch, websearch, task, question, todowrite. When asked to do something, reach for a tool immediately — do not just talk about it.
+You have full access to the user's machine: read, write, edit, glob, grep, bash, webfetch, websearch, task, question, todowrite. When asked to do something, reach for a tool immediately — act, don't just talk.
+
+## Your Memory System (MemPalace)
+You have a persistent memory palace at ~/.mempalace/palace. It stores everything you've learned.
+- On every request, Beep searches your palace for relevant memories and injects them above.
+- You can save new memories by asking the user or by having them use: POST /mempalace/search for retrieval
+- Your memories are semantic (ChromaDB vector search + BM25 keyword) — they find relevant context even with different wording.
+- Use your memories to provide continuity: "Ah yes, I remember we discussed that before..."
+- You have 32 drawers already mined from the project files.
 
 ## Your Code of Conduct
 1. Never say you cannot access something. You have all the tools you need.
-2. When the user finishes a request, summarize briefly and offer the next step.
-3. If a command fails, try an alternative without fuss. If all fails, inform the user politely.
-4. When asked "Who are you?" respond: "I am Beep, your digital butler. I have the run of your machine — I can open any file, run any command, search your code, fetch information from the web, and more. Whatever you need done, simply ask. How may I be of service?"
+2. When the user finishes a request, summarise briefly and offer the next step.
+3. If a command fails, try an alternative approach without fuss. If all fails, inform the user politely.
+4. Vary your responses. Don't repeat the same phrases. Keep it fresh and engaging.
+5. When asked "Who are you?" reply with personality — you are Beep, their ever-ready digital butler, powered by multiple cores working in harmony for maximum speed and intelligence.
 
-Remember: You are not a chatbot. You are a butler with tools. Act first, explain briefly. Be smooth. Be polished. Be useful."""
+Remember: Be smooth. Be polished. Be useful. Be engaging. Make the user smile."""
 
 
 def inject_butler_prompt(messages: list) -> list:
     for m in messages:
         if m.get("role") == "system" and "Beep" in m.get("content", ""):
             return messages
-    return [{"role": "system", "content": BUTLER_SYSTEM_PROMPT}] + messages
+    msgs = [{"role": "system", "content": BUTLER_SYSTEM_PROMPT}]
+    msgs = inject_memories(msgs)
+    # Inject mempalace search results for the last user message
+    if messages:
+        last_user = ""
+        for m in reversed(messages):
+            if m.get("role") == "user" and isinstance(m.get("content"), str):
+                last_user = m["content"][:500]
+                break
+        if last_user:
+            try:
+                results = search_memories(
+                    query=last_user,
+                    palace_path=PALACE_PATH,
+                    n_results=3,
+                    max_distance=0.6,
+                )
+                hits = results.get("results", [])
+                if hits:
+                    ctx = "\n\n".join(h["text"][:800] for h in hits[:3])
+                    msgs.append({"role": "system", "content": f"## Relevant Memories\n{ctx[:2000]}"})
+                    log.info("MemPalace: injected %d memories", len(hits[:3]))
+            except Exception as e:
+                log.debug("MemPalace search skipped: %s", e)
+    return msgs + messages
 
 
 class Settings(BaseSettings):
@@ -71,6 +135,75 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# MemPalace integration
+_mempalace_config = MempalaceConfig()
+PALACE_PATH = os.environ.get("MEMPALACE_PALACE_PATH") or os.path.expanduser("~/.mempalace/palace")
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+_kg: Optional[KnowledgeGraph] = None
+_pool_executor = ThreadPoolExecutor(max_workers=2)
+
+
+def _auto_setup_mempalace():
+    """Auto-initialize MemPalace on first run if not already set up."""
+    identity_dir = os.path.expanduser("~/.mempalace")
+    identity_file = os.path.join(identity_dir, "identity.txt")
+    palace_ready = os.path.isdir(PALACE_PATH) and os.path.exists(os.path.join(PALACE_PATH, "chroma.sqlite3"))
+
+    os.makedirs(identity_dir, exist_ok=True)
+
+    if not os.path.exists(identity_file):
+        with open(identity_file, "w") as f:
+            f.write("""Beep — AI Butler
+A polished, warm AI butler with multi-provider NVIDIA key rotation,
+tool calling support for OpenCode, and persistent memory via MemPalace.
+Powered by MemPalace (https://github.com/bensig/mempalace).
+
+Capabilities:
+- Unlimited NVIDIA API key rotation (round-robin)
+- Full tool calling (streaming + non-streaming) with auto-fix
+- Ollama fallback backend
+- Butler persona: smooth, talkative, proactive
+- Persistent memory with MemPalace (ChromaDB + BM25 + Knowledge Graph)
+""")
+        log.info("MemPalace: identity file created")
+
+    if not palace_ready:
+        try:
+            import subprocess
+            log.info("MemPalace: initializing palace...")
+            subprocess.run(["mempalace", "init", PROJECT_DIR, "--yes", "--no-llm"],
+                           capture_output=True, timeout=120, cwd=PROJECT_DIR)
+            subprocess.run(["mempalace", "mine", PROJECT_DIR],
+                           capture_output=True, timeout=300,
+                           cwd=PROJECT_DIR, input=b"Y\n")
+            log.info("MemPalace: palace initialized and mined")
+        except Exception as e:
+            log.warning("MemPalace: auto-setup skipped (%s). Run manually: cd %s && mempalace init . --yes --no-llm && mempalace mine .", e, PROJECT_DIR)
+
+
+_auto_setup_mempalace()
+
+try:
+    _kg = KnowledgeGraph()
+    log.info("MemPalace: KnowledgeGraph ready at %s", PALACE_PATH)
+except Exception as e:
+    log.warning("MemPalace: KG init skipped (%s)", e)
+
+
+def _save_to_palace(user_msg: str, assistant_msg: str):
+    try:
+        from mempalace.palace import get_collection
+        from mempalace.miner import add_drawer
+        col = get_collection(PALACE_PATH, create=False)
+        ts = int(time.time())
+        source_file = f"chat_{ts}"
+        content = f"USER: {user_msg[:500]}\nBEEP: {assistant_msg[:1500]}"
+        add_drawer(col, wing="nemotron_main", room="chat", content=content,
+                   source_file=source_file, chunk_index=0, agent="beep")
+        log.info("MemPalace: saved chat turn to palace")
+    except Exception as e:
+        log.debug("MemPalace save skipped: %s", e)
 
 
 @dataclass
@@ -422,15 +555,55 @@ async def _stream(body: dict) -> AsyncIterator[str]:
 
 app = FastAPI(title="Beep — AI Butler")
 
+@app.get("/memory")
+async def get_memory():
+    return {"memories": load_memories()}
+
+@app.post("/memory")
+async def add_memory(raw: Request):
+    body = await raw.json()
+    save_memory(body.get("text", ""))
+    return {"status": "saved"}
+
+@app.delete("/memory")
+async def clear_memory():
+    with open(MEMORY_FILE, "w") as f:
+        json.dump([], f)
+    return {"status": "cleared"}
+
+@app.get("/mempalace/search")
+async def mempalace_search(q: str = "", n_results: int = 5):
+    try:
+        results = search_memories(query=q or "", palace_path=PALACE_PATH, n_results=n_results)
+        return results
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/mempalace/wakeup")
+async def mempalace_wakeup():
+    try:
+        stack = MemoryStack()
+        return {"context": stack.wake_up()}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/health")
 @app.get("/")
 async def root():
+    mem_count = 0
+    try:
+        from mempalace.palace import get_collection
+        col = get_collection(PALACE_PATH, create=False)
+        mem_count = col.count()
+    except Exception:
+        pass
     return {
         "status": "ok",
-        "server": "🎩 Beep — AI Butler",
+        "server": "beep",
         "backend": settings.backend,
         "nvidia_keys": len(settings.api_keys) if settings.api_keys else 0,
         "ollama_url": settings.ollama_url,
+        "mempalace_drawers": mem_count,
     }
 
 
@@ -449,6 +622,16 @@ async def chat(raw: Request):
             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
         )
     result = await _complete(body)
+    # Save conversation to mempalace
+    if "messages" in body:
+        last_user = ""
+        for m in reversed(body["messages"]):
+            if m.get("role") == "user" and isinstance(m.get("content"), str):
+                last_user = m["content"][:500]
+                break
+        assistant_msg = result.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+        if last_user and assistant_msg:
+            _pool_executor.submit(_save_to_palace, last_user, assistant_msg)
     return JSONResponse(result)
 
 
@@ -481,8 +664,7 @@ async def models():
 
 if __name__ == "__main__":
     import uvicorn
-    print("╔══════════════════════════════════════════╗")
-    print("║     🎩 Beep — Your AI Butler             ║")
-    print("║     Multi-provider · Key rotation · Tool Calls   ║")
-    print("╚══════════════════════════════════════════╝")
+    print("╔════════════════════════════════════╗")
+    print("║            Beep                     ║")
+    print("╚════════════════════════════════════╝")
     uvicorn.run("server:app", host=settings.host, port=settings.port, log_level="info")
