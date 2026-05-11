@@ -186,6 +186,18 @@ NVIDIA_API_KEYS=nvapi-1,nvapi-2,nvapi-3,nvapi-4,nvapi-5,nvapi-6,nvapi-7,nvapi-8,
 
 ---
 
+## 🎩 Butler Persona
+
+Beep becomes a **polite, proactive AI butler** when you add the `AGENTS.md` instruction file:
+
+```
+~/.config/opencode/AGENTS.md
+```
+
+This transforms the agent into a digital majordomo — polished, attentive, and smooth. It will greet you with warmth, anticipate your needs, and execute tasks with elegance. Copy `AGENTS.example.md` from this repo to get started.
+
+---
+
 ## Connect OpenCode
 
 ### Step 1: Start Beep
